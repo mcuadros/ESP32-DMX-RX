@@ -24,6 +24,8 @@ long DMX::last_dmx_packet = 0;
 
 uint8_t DMX::dmx_data[513];
 
+bool DMX::pending = true;
+
 DMX::DMX()
 {
 
@@ -56,6 +58,15 @@ void DMX::Initialize()
     sync_dmx = xSemaphoreCreateMutex();
 }
 
+
+uint8_t* DMX::Read()
+{
+    xSemaphoreTake(sync_dmx, portMAX_DELAY);
+    auto tmp = dmx_data;
+    xSemaphoreGive(sync_dmx);
+    return tmp;
+}
+
 uint8_t DMX::Read(uint16_t channel)
 {
     // restrict acces to dmx array to valid values
@@ -72,6 +83,15 @@ uint8_t DMX::Read(uint16_t channel)
     uint8_t tmp_dmx = dmx_data[channel];
     xSemaphoreGive(sync_dmx);
     return tmp_dmx;
+}
+
+bool DMX::HasChanged()
+{
+    xSemaphoreTake(sync_dmx, portMAX_DELAY);
+    bool is_pending = pending;
+    pending = false;
+    xSemaphoreGive(sync_dmx);
+    return is_pending;
 }
 
 uint8_t DMX::IsHealthy()
@@ -127,7 +147,9 @@ void DMX::uart_event_task(void *pvParameters)
                         {
                             if(current_rx_addr < 513)
                             {
-                                dmx_data[current_rx_addr++] = dtmp[i];
+                                if (!pending && dmx_data[current_rx_addr] != dtmp[i]) pending = true;
+                                dmx_data[current_rx_addr] = dtmp[i];
+                                current_rx_addr++;
                             }
                         }
                         xSemaphoreGive(sync_dmx);
